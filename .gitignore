@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Generated CAD models (rebuild with the *.py scripts)
+*.step
+*.stp
+*.stl
+!/hardware/**
+
+# Upstream clone (https://github.com/hku-mars/SUPER-Hardware); needed files live in hardware/
+SUPER-Hardware/
