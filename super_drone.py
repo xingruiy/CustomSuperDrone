@@ -82,6 +82,7 @@ LED_R = 105.0  # LED bar center, measured from the frame center along the arm
 NUC_SHIFT = 0.45
 HOLDER = HolderParams()  # 3D printed battery holder (battery_holder.py); its flange sits under the battery plate
 FOOT_Y = HOLDER.length / 2  # inner face of each foot (the holder end face)
+M3_NUT_AF, M3_NUT_H = 5.5, 2.4  # ISO 4032 M3 nut, in the holder nut traps
 
 CARBON = (0.13, 0.13, 0.14)
 ALU = (0.72, 0.74, 0.78)
@@ -366,12 +367,20 @@ def build_tree(p: SuperParams) -> Group:
             cx, cy = sx * MOTOR_XY, sy * MOTOR_XY
             for dx, dy in ((MOTOR_HOLE_R, 0), (-MOTOR_HOLE_R, 0), (0, MOTOR_HOLE_R), (0, -MOTOR_HOLE_R)):
                 hw.append((m3x8, loc(up, (cx + dx, cy + dy, MAIN_T))))
-        # Foot screws: through each foot into the holder end blocks, heads outside.
+        # Foot screws: through each foot into the holder end blocks, heads outside,
+        # into M3 nuts in the holder nut traps. The nut sits at the outer end of its trap.
+        m3x12 = Part("screw_m3x12_button", lambda: (button_screw(3.0, 12.0), STEEL))
+        m3_nut = Part("nut_m3", lambda: (hex_nut(3.0, M3_NUT_AF, M3_NUT_H), STEEL))
+        nut_axis_y = ((0, 1, 0), (0, 0, 1), (1, 0, 0))  # nut axis along drone +Y, hex corners up and down
+        trap_end = FOOT_Y - HOLDER.end_block_l + HOLDER.nut_depth  # outer end of each nut trap
+        foot_z = BAT_Z - HOLDER.foot_hole_z
         for sy in (-1, 1):
             # The screw's local +Z (head side) points away from the holder.
             side = ((1, 0, 0), (0, 0, -1), (0, 1, 0)) if sy < 0 else ((1, 0, 0), (0, 0, 1), (0, -1, 0))
-            for x in (-8.5, 8.5):
-                hw.append((m3x10, loc(side, (x, sy * (FOOT_Y + 4.0), BAT_Z - 5.0))))
+            nut_y = trap_end - M3_NUT_H if sy > 0 else -trap_end
+            for x in (-HOLDER.foot_hole_y, HOLDER.foot_hole_y):
+                hw.append((m3x12, loc(side, (x, sy * (FOOT_Y + 4.0), foot_z))))
+                hw.append((m3_nut, loc(nut_axis_y, (x, nut_y, foot_z))))
         groups.append(Group("hardware", hw))
 
         # FC stack: M2 screws from the top of the main plate, spacers between the boards, nuts under the ESC.
