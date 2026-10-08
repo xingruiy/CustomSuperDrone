@@ -12,6 +12,8 @@ Output: a folder with one STEP file per part and a top assembly file that
 links to them (STEP AP214 external references). Parts used more than once
 (motors, props, standoffs, screws) are one file with many instances. Open the
 top file (super_drone.step) in a CAD program. Keep all files in one folder.
+With --single-file, the same assembly tree goes into one STEP file instead, for
+CAD programs that do not follow external references (Fusion 360).
 
 Coordinates, all in mm: X forward, Y left, Z up. Z = 0 is the bottom face of
 the main plate. The origin is the frame center.
@@ -19,6 +21,7 @@ the main plate. The origin is the frame center.
 Usage:
     uv run python super_drone.py
     uv run python super_drone.py --lidar-yaw 0 --no-leds -o super_drone_b
+    uv run python super_drone.py --single-file  # writes super_drone.step
 """
 
 import argparse
@@ -397,7 +400,7 @@ def groups_as_items(groups):
     return [(g, loc()) for g in groups]
 
 
-# ---------------------------------------------------------------- multi-file STEP
+# ---------------------------------------------------------------- STEP export
 
 
 def collect_parts(node, out: dict) -> None:
@@ -418,6 +421,47 @@ def set_name(label, name):
     TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
 
 
+def add_shape(doc, tool, assy: cq.Assembly, name: str):
+    """Add the shape of an assembly node (no children) as one named, colored product."""
+    shape = assy.obj if isinstance(assy.obj, cq.Shape) else cq.Compound.makeCompound(assy.shapes)
+    label = tool.AddShape(shape.wrapped, False)
+    set_name(label, name)
+    if assy.color is not None:
+        XCAFDoc_DocumentTool.ColorTool_s(doc.Main()).SetColor(label, assy.color.wrapped, XCAFDoc_ColorSurf)
+    return label
+
+
+def add_part(doc, tool, assy: cq.Assembly):
+    """Add a built part: one product, or a sub-assembly of its colored pieces."""
+    if not assy.children:
+        return add_shape(doc, tool, assy, assy.name)
+    label = tool.NewShape()
+    set_name(label, assy.name)
+    if assy.obj is not None:
+        tool.AddComponent(label, add_shape(doc, tool, assy, f"{assy.name}_part"), cq.Location().wrapped)
+    for child in assy.children:
+        tool.AddComponent(label, add_part(doc, tool, child), child.loc.wrapped)
+    return label
+
+
+def add_tree(tool, group: Group, labels: dict):
+    """Add the group tree. Every use of a part is an instance of its one label."""
+    label = tool.NewShape()
+    set_name(label, group.name)
+    for item, where in group.items:
+        child = add_tree(tool, item, labels) if isinstance(item, Group) else labels[item.name]
+        tool.AddComponent(label, child, where.wrapped)
+    return label
+
+
+def step_writer(assembly: bool) -> STEPCAFControl_Writer:
+    writer = STEPCAFControl_Writer()
+    writer.SetNameMode(True)
+    writer.SetColorMode(True)
+    Interface_Static.SetIVal_s("write.step.assembly", int(assembly))  # 0 keeps a compound as one product
+    return writer
+
+
 def export_part(part: Part, path: str) -> None:
     """Write one part file. A single-shape part becomes the root product itself.
     cq.Assembly.export would wrap it in an unnamed root, and the CAD tree would
@@ -427,17 +471,26 @@ def export_part(part: Part, path: str) -> None:
         assy.export(path, exportType="STEP")
         return
     doc, tool = new_doc()
-    shape = assy.obj if isinstance(assy.obj, cq.Shape) else cq.Compound.makeCompound(assy.obj.vals())
-    label = tool.AddShape(shape.wrapped, False)
-    set_name(label, part.name)
-    if assy.color is not None:
-        XCAFDoc_DocumentTool.ColorTool_s(doc.Main()).SetColor(label, assy.color.wrapped, XCAFDoc_ColorSurf)
-    Interface_Static.SetIVal_s("write.step.assembly", 0)  # keep a compound as one product
-    writer = STEPCAFControl_Writer()
-    writer.SetNameMode(True)
-    writer.SetColorMode(True)
+    add_shape(doc, tool, assy, part.name)
+    writer = step_writer(assembly=False)
     if not writer.Transfer(doc, STEPControl_AsIs) or writer.Write(path) != IFSelect_RetDone:
         raise RuntimeError(f"STEP export failed for {part.name}")
+
+
+def write_single(root: Group, path: Path) -> list[str]:
+    """Write the whole assembly into one STEP file, for CAD programs that do not
+    follow external references (Fusion 360). The tree and part instances are kept."""
+    parts: dict[str, Part] = {}
+    collect_parts(root, parts)
+    doc, tool = new_doc()
+    labels = {name: add_part(doc, tool, part.build()) for name, part in parts.items()}
+    add_tree(tool, root, labels)
+    tool.UpdateAssemblies()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = step_writer(assembly=True)
+    if not writer.Transfer(doc, STEPControl_AsIs) or writer.Write(str(path)) != IFSelect_RetDone:
+        raise RuntimeError("STEP export failed")
+    return sorted(parts)
 
 
 def write_multifile(root: Group, out_dir: Path) -> list[str]:
@@ -458,15 +511,7 @@ def write_multifile(root: Group, out_dir: Path) -> list[str]:
         labels[name] = tool.AddShape(placeholder.wrapped, False)
         set_name(labels[name], name)
 
-    def add_group(group: Group):
-        label = tool.NewShape()
-        set_name(label, group.name)
-        for item, where in group.items:
-            child = add_group(item) if isinstance(item, Group) else labels[item.name]
-            tool.AddComponent(label, child, where.wrapped)
-        return label
-
-    add_group(root)
+    add_tree(tool, root, labels)
     tool.UpdateAssemblies()
 
     if out_dir.exists():
@@ -475,10 +520,7 @@ def write_multifile(root: Group, out_dir: Path) -> list[str]:
     cwd = os.getcwd()
     os.chdir(out_dir)  # the writer puts the linked files in the current folder
     try:
-        writer = STEPCAFControl_Writer()
-        writer.SetNameMode(True)
-        writer.SetColorMode(True)
-        Interface_Static.SetIVal_s("write.step.assembly", 1)
+        writer = step_writer(assembly=True)
         top = f"{root.name}.step"
         if not writer.Transfer(doc, STEPControl_AsIs, ""):
             raise RuntimeError("STEP transfer failed")
@@ -499,7 +541,7 @@ def write_multifile(root: Group, out_dir: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build the SUPER quadrotor as a multi-file STEP assembly.")
+    parser = argparse.ArgumentParser(description="Build the SUPER quadrotor as a STEP assembly.")
     for f in dataclasses.fields(SuperParams):
         flag = "--" + f.name.replace("_", "-")
         if f.type is bool:
@@ -507,16 +549,24 @@ def main() -> None:
                                 help=f"default: {f.default}")
         else:
             parser.add_argument(flag, dest=f.name, type=f.type, default=None, help=f"default: {f.default}")
-    parser.add_argument("-o", "--output", default="super_drone", help="output folder")
+    parser.add_argument("-o", "--output", default="super_drone",
+                        help="output folder (or file name without .step, with --single-file)")
+    parser.add_argument("--single-file", action="store_true",
+                        help="write one self-contained STEP file (for Fusion 360) instead of a folder")
     args = vars(parser.parse_args())
-    out_dir = Path(args.pop("output"))
+    out, single = Path(args.pop("output")), args.pop("single_file")
     try:
         p = SuperParams(**{k: v for k, v in args.items() if v is not None})
         root = build_tree(p)
     except ValueError as e:
         parser.error(str(e))
-    names = write_multifile(root, out_dir)
-    print(f"Wrote {out_dir}/{root.name}.step and {len(names)} part files:")
+    if single:
+        path = out.with_suffix(".step")
+        names = write_single(root, path)
+        print(f"Wrote {path} with {len(names)} parts")
+        return
+    names = write_multifile(root, out)
+    print(f"Wrote {out}/{root.name}.step and {len(names)} part files:")
     for n in names:
         print(f"  {n}.step")
 
