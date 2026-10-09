@@ -20,7 +20,7 @@ the main plate. The origin is the frame center.
 
 Usage:
     uv run python super_drone.py
-    uv run python super_drone.py --lidar-yaw 0 --no-leds -o super_drone_b
+    uv run python super_drone.py --lidar-yaw 0 -o super_drone_b
     uv run python super_drone.py --no-guard  # without the LiDAR guard
     uv run python super_drone.py --single-file  # writes super_drone.step
 """
@@ -77,7 +77,6 @@ MOTOR_XY = 98.99  # motor centers at (+-MOTOR_XY, +-MOTOR_XY): 280 mm wheelbase
 MOTOR_HOLE_R = 9.5  # 4 x M3 on a 19 mm circle, on the plate axes
 # (name, sign x, sign y, prop direction seen from above), PX4 quad X order
 MOTORS = [("fr", 1, -1, "ccw"), ("fl", 1, 1, "cw"), ("rl", -1, 1, "ccw"), ("rr", -1, -1, "cw")]
-LED_R = 105.0  # LED bar center, measured from the frame center along the arm
 # The NUC sits turned 90 degrees: its back panel faces -X. It moves 0.45 mm along
 # its own Y so its round holes and slots both fit the plate holes (90 mm apart).
 NUC_SHIFT = 0.45
@@ -91,8 +90,6 @@ STEEL = (0.25, 0.25, 0.27)
 NYLON = (0.90, 0.90, 0.88)
 PRINT_BLACK = (0.10, 0.10, 0.11)
 BATTERY_GRAY = (0.30, 0.31, 0.34)
-LED_FRONT = (0.10, 0.45, 0.95)
-LED_REAR = (0.95, 0.15, 0.10)
 
 
 @dataclass
@@ -103,7 +100,6 @@ class SuperParams:
     battery_l: float = 140.0  # DualSky XP33006HED 6S 3300 mAh
     battery_w: float = 44.0
     battery_h: float = 33.0
-    leds: bool = True  # LED bars on the arms (blue front, red rear)
     guard: bool = True  # 3D printed LiDAR guard on the top plate (lidar_guard.py)
     hardware: bool = True  # screws, nuts and FC stack spacers
 
@@ -202,11 +198,6 @@ def make_battery(p: SuperParams) -> cq.Assembly:
     return assy
 
 
-def make_led_bar(color) -> tuple:
-    bar = cq.Workplane("XY").box(36.0, 6.0, 3.0).edges("|Z").fillet(2.0).translate((0, 0, 1.5)).val()
-    return bar, color
-
-
 # ---------------------------------------------------------------- motors and props
 
 
@@ -292,13 +283,6 @@ def build_tree(p: SuperParams) -> Group:
     foot_z = BAT_Z - 4.0
     frame.append((foot, loc(((1, 0, 0), (0, 0, -1), (0, 1, 0)), (0, -FOOT_Y, foot_z))))
     frame.append((foot, loc(((-1, 0, 0), (0, 0, 1), (0, 1, 0)), (0, FOOT_Y, foot_z))))
-    if p.leds:
-        led_front = Part("led_bar_blue", lambda: make_led_bar(LED_FRONT))
-        led_rear = Part("led_bar_red", lambda: make_led_bar(LED_REAR))
-        for _, sx, sy, _ in MOTORS:
-            angle = math.degrees(math.atan2(sy, sx))
-            r = LED_R / math.sqrt(2)
-            frame.append((led_front if sx > 0 else led_rear, loc(rot_z(angle), (sx * r, sy * r, MAIN_T))))
 
     # Compute: NUC on standoffs, back panel to the rear
     compute = [(nuc_standoff, loc(t=(x, y, MAIN_T))) for x, y in NUC_HOLES_XY]
