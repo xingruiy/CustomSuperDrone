@@ -1,7 +1,10 @@
 [project]
-name = "drone-motor"
+name = "custom-super-drone"
 version = "0.1.0"
-description = "Add your description here"
+description = "Parametric CadQuery models of a SUPER quadrotor with a Livox Mid-360S LiDAR and an Intel NUC 13 Pro"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "hardware/LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "cadquery>=2.8.0",

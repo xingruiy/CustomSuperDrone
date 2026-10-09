@@ -90,3 +90,8 @@ of the main plate, and the origin is the frame center.
 The SUPER frame and the battery holder design come from
 [hku-mars/SUPER-Hardware](https://github.com/hku-mars/SUPER-Hardware) (MIT license,
 see `hardware/LICENSE`).
+
+## License
+
+The code in this repository is under the MIT license, see `LICENSE`. The files in
+`hardware/` keep their own MIT license from HKU-Mars-Lab, see `hardware/LICENSE`.
