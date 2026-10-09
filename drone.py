@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import cadquery as cq
 
-from drone_motor_full import FullMotorParams
+from drone_motor import MotorParams
 from fcu import FCParams, Layout, block, build_fc, chip, jst_sh, mount_hardware, ring, to_assembly
 from motor_prop import build_motor_prop
 from prop import PropParams, parse_spec
@@ -124,7 +124,7 @@ def rect_distance(px: float, py: float, x0: float, y0: float, x1: float, y1: flo
     return math.hypot(max(x0 - px, 0, px - x1), max(y0 - py, 0, py - y1))
 
 
-def check_layout(d: DroneParams, m: FullMotorParams, pp: PropParams, fc: FCParams) -> None:
+def check_layout(d: DroneParams, m: MotorParams, pp: PropParams, fc: FCParams) -> None:
     prop_r = pp.diameter / 2
     side = d.wheelbase / math.sqrt(2)
     if side < 2 * prop_r + 2.0:
@@ -164,7 +164,7 @@ def arm_exit_r(d: DroneParams, angle: float) -> float:
     return min(d.body_l / 2 / abs(math.cos(a)), d.body_w / 2 / abs(math.sin(a)))
 
 
-def make_bottom_plate(d: DroneParams, m: FullMotorParams, fc: FCParams) -> cq.Workplane:
+def make_bottom_plate(d: DroneParams, m: MotorParams, fc: FCParams) -> cq.Workplane:
     plate = plate_outline(d, d.plate_t)
     for _, angle, x, y, _ in motor_positions(d):
         arm = (
@@ -347,7 +347,7 @@ def check_fit(d: DroneParams, fc: FCParams, camera: cq.Shape) -> None:
 
 
 def build_drone(d: DroneParams) -> cq.Assembly:
-    m = FullMotorParams()
+    m = MotorParams()
     fc = FCParams(seed=d.seed)
     base_prop = dict(parse_spec(d.spec), bore_d=m.shaft_d)
     props = {dr: PropParams(**base_prop, direction=dr) for dr in ("ccw", "cw")}

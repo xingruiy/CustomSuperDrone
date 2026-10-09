@@ -1,6 +1,6 @@
 """Drone motor with propeller and prop nut, as one STEP assembly.
 
-Uses the full motor from drone_motor_full.py and the propeller from prop.py.
+Uses the motor from drone_motor.py and the propeller from prop.py.
 The prop hub sits on the shaft boss of the bell. A hex nut on the shaft holds it.
 
 The Z axis is the motor axis. Z = 0 is the motor mounting face. All units are mm.
@@ -17,23 +17,23 @@ import dataclasses
 
 import cadquery as cq
 
-from drone_motor_full import FullMotorParams, build_motor
+from drone_motor import MotorParams, build_motor
 from prop import PropParams, build_prop, parse_spec
 
 PROP_PREFIX = "prop_"
 
 
-def nut_size(p: FullMotorParams) -> tuple[float, float]:
+def nut_size(p: MotorParams) -> tuple[float, float]:
     """Nut (across flats, height). Close to an M5 nyloc nut for a 5 mm shaft."""
     return 1.6 * p.shaft_d, p.shaft_d
 
 
-def prop_z(m: FullMotorParams) -> float:
+def prop_z(m: MotorParams) -> float:
     """Z of the prop hub bottom: the top of the shaft boss on the bell."""
     return m.bell_top_z + m.boss_h
 
 
-def make_nut(m: FullMotorParams, z0: float) -> cq.Workplane:
+def make_nut(m: MotorParams, z0: float) -> cq.Workplane:
     af, h = nut_size(m)
     thread_d = m.shaft_d - 0.6 if m.prop_nut_thread else m.shaft_d
     return (
@@ -49,7 +49,7 @@ def make_nut(m: FullMotorParams, z0: float) -> cq.Workplane:
     )
 
 
-def check_fit(m: FullMotorParams, pp: PropParams, prop: cq.Workplane) -> None:
+def check_fit(m: MotorParams, pp: PropParams, prop: cq.Workplane) -> None:
     z0 = prop_z(m)
     _, nut_h = nut_size(m)
     shaft_top = m.bell_top_z + m.shaft_len
@@ -66,7 +66,7 @@ def check_fit(m: FullMotorParams, pp: PropParams, prop: cq.Workplane) -> None:
         raise ValueError("prop blades hit the bell: increase --shaft-len or reduce --prop-max-twist")
 
 
-def build_motor_prop(m: FullMotorParams, pp: PropParams) -> cq.Assembly:
+def build_motor_prop(m: MotorParams, pp: PropParams) -> cq.Assembly:
     prop = build_prop(pp)
     check_fit(m, pp, prop)
     z0 = prop_z(m)
@@ -98,7 +98,7 @@ def main() -> None:
         help="prop size in inches as DIAMETERxPITCH[xBLADES], e.g. 5.1x4.3x3. --prop-* flags override it.",
     )
     motor_group = parser.add_argument_group("motor")
-    add_param_args(motor_group, FullMotorParams)
+    add_param_args(motor_group, MotorParams)
     prop_group = parser.add_argument_group("prop")
     add_param_args(prop_group, PropParams, PROP_PREFIX)
     parser.add_argument("-o", "--output", default="motor_prop.step", help="STEP output path")
@@ -107,14 +107,14 @@ def main() -> None:
     spec = args.pop("spec")
 
     # Split by field name: the motor field prop_nut_thread also starts with "prop_".
-    motor_names = {f.name for f in dataclasses.fields(FullMotorParams)}
+    motor_names = {f.name for f in dataclasses.fields(MotorParams)}
     prop_names = {PROP_PREFIX + f.name for f in dataclasses.fields(PropParams)}
     motor_values = {k: v for k, v in args.items() if v is not None and k in motor_names}
     prop_values = {
         k.removeprefix(PROP_PREFIX): v for k, v in args.items() if v is not None and k in prop_names
     }
     try:
-        m = FullMotorParams(**motor_values)
+        m = MotorParams(**motor_values)
         values = parse_spec(spec) if spec else {}
         values["bore_d"] = m.shaft_d  # the prop fits the motor shaft
         values.update(prop_values)

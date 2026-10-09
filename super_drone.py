@@ -22,6 +22,7 @@ Usage:
     uv run python super_drone.py
     uv run python super_drone.py --lidar-yaw 0 -o super_drone_b
     uv run python super_drone.py --no-guard  # without the LiDAR guard
+    uv run python super_drone.py --motor-detail simple  # motors as outer shapes only
     uv run python super_drone.py --single-file  # writes super_drone.step
 """
 
@@ -47,7 +48,8 @@ from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_DocumentTool
 
 from battery_holder import HolderParams, build_holder
 from drone import make_esc
-from drone_motor_full import FullMotorParams, build_motor
+from drone_motor import DETAILS as MOTOR_DETAILS
+from drone_motor import MotorParams, build_motor
 from fcu import PRESETS, FCParams, build_fc
 from lidar_guard import RIB_ANGLES, GuardParams, build_guard, check_guard
 from mid360s import Mid360Params, build_mid360s
@@ -102,6 +104,7 @@ class SuperParams:
     battery_h: float = 33.0
     guard: bool = True  # 3D printed LiDAR guard on the top plate (lidar_guard.py)
     hardware: bool = True  # screws, nuts and FC stack spacers
+    motor_detail: str = "full"  # full (stator, windings, magnets, bearings) or simple (outer shape)
 
     def __post_init__(self):
         if self.lidar_yaw % 90:
@@ -110,6 +113,8 @@ class SuperParams:
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
         parse_spec(self.prop_spec)
+        if self.motor_detail not in MOTOR_DETAILS:
+            raise ValueError(f"motor_detail must be one of {', '.join(MOTOR_DETAILS)}")
 
 
 # ---------------------------------------------------------------- placement
@@ -201,9 +206,10 @@ def make_battery(p: SuperParams) -> cq.Assembly:
 # ---------------------------------------------------------------- motors and props
 
 
-def f90_params() -> FullMotorParams:
+def f90_params(detail: str = "full") -> MotorParams:
     """T-Motor F90 2806.5: 28 x 6.5 mm stator, 33.4 x 34.7 mm, 19 mm mount circle."""
-    return FullMotorParams(
+    return MotorParams(
+        detail=detail,
         stator_d=28.0, stator_h=6.5, stator_bore=16.0, magnet_t=1.3, bell_wall=1.0,
         base_d=30.0, base_h=5.0, clearance=1.5, mount_pcd=2 * MOTOR_HOLE_R,
         shaft_d=5.0, shaft_len=17.1, vent_pcd=22.0,
@@ -217,13 +223,13 @@ def prop_params(p: SuperParams, direction: str) -> PropParams:
     return PropParams(**values)
 
 
-def prop_loc(m: FullMotorParams, pp: PropParams) -> cq.Location:
+def prop_loc(m: MotorParams, pp: PropParams) -> cq.Location:
     """The motor hangs upside down, so the prop is also turned over on the shaft.
     Its thrust then points up in the drone."""
     return loc(FLIP_X, (0, 0, prop_z(m) + pp.hub_h))
 
 
-def check_props(m: FullMotorParams, pp: PropParams, prop: cq.Shape) -> None:
+def check_props(m: MotorParams, pp: PropParams, prop: cq.Shape) -> None:
     _, nut_h = nut_size(m)
     if m.boss_h + pp.hub_h + nut_h > m.shaft_len:
         raise ValueError("the motor shaft is too short for the prop hub and nut")
@@ -240,7 +246,7 @@ def check_props(m: FullMotorParams, pp: PropParams, prop: cq.Shape) -> None:
 
 
 def build_tree(p: SuperParams) -> Group:
-    m = f90_params()
+    m = f90_params(p.motor_detail)
     props = {d: prop_params(p, d) for d in ("ccw", "cw")}
     prop_shapes = {d: build_prop(pp).val() for d, pp in props.items()}
     check_props(m, props["ccw"], prop_shapes["ccw"])

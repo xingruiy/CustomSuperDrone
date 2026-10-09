@@ -44,6 +44,7 @@ Some options:
 uv run python super_drone.py --lidar-yaw 0        # turn the LiDAR (multiples of 90 degrees)
 uv run python super_drone.py --no-guard           # without the LiDAR guard
 uv run python super_drone.py --no-hardware        # without screws, nuts and spacers
+uv run python super_drone.py --motor-detail simple # motors as outer shapes only (lighter in CAD)
 uv run python super_drone.py --prop-spec 7x3.5x3  # other props (diameter x pitch x blades, in inches)
 uv run python super_drone.py --help               # all options
 ```
@@ -73,7 +74,7 @@ uv run python lidar_guard.py   # writes lidar_guard.step and lidar_guard.stl
 | `mid360s.py` | Livox Mid-360S LiDAR, with an optional FOV solid |
 | `nuc13pro.py` | Intel NUC 13 Pro board and CPU cooler, without the case |
 | `fcu.py` | Placeholder flight controller (for fit checks) |
-| `drone_motor_full.py`, `drone_motor.py` | Brushless outrunner motor, full and outer-shape models |
+| `drone_motor.py` | Brushless outrunner motor: full inner parts, or outer shape only with `--detail simple` |
 | `prop.py`, `motor_prop.py` | Propeller with NACA airfoil blades, and motor with prop and nut |
 | `drone.py` | A separate generic 5 inch FPV quadcopter |
 | `hardware/` | Carbon fiber plate STEP files and the battery holder STL from [SUPER-Hardware](https://github.com/hku-mars/SUPER-Hardware) |
