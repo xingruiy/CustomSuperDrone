@@ -1,9 +1,9 @@
 """SUPER quadrotor (HKU MARS) as a multi-file STEP assembly.
 
 The frame is the SUPER carbon fiber kit (hardware/CarbonFiber, from hku-mars/SUPER-Hardware). The
-Livox Mid-360S sits on the top plate. The NUC 13 Pro board sits on the main
-plate, between the main and top plates, inside a 3D printed shield ring that
-slides over the four pillars (nuc_shield.py). The flight controller and ESC stack
+Livox Mid-360S sits on the top plate, inside a 3D printed guard (lidar_guard.py)
+that screws to the same plate. The NUC 13 Pro board sits on the main
+plate, between the main and top plates. The flight controller and ESC stack
 hang under the main plate. The battery hangs under the battery plate in a
 3D printed holder, with two carbon feet. The motors hang under the arm tips,
 with the props below them.
@@ -21,6 +21,7 @@ the main plate. The origin is the frame center.
 Usage:
     uv run python super_drone.py
     uv run python super_drone.py --lidar-yaw 0 --no-leds -o super_drone_b
+    uv run python super_drone.py --no-guard  # without the LiDAR guard
     uv run python super_drone.py --single-file  # writes super_drone.step
 """
 
@@ -48,11 +49,11 @@ from battery_holder import HolderParams, build_holder
 from drone import make_esc
 from drone_motor_full import FullMotorParams, build_motor
 from fcu import PRESETS, FCParams, build_fc
+from lidar_guard import RIB_ANGLES, GuardParams, build_guard, check_guard
 from mid360s import Mid360Params, build_mid360s
 from motor_prop import make_nut, nut_size, prop_z
 from nuc13pro import NucParams, build_nuc
 from nuc13pro import PCB_T as NUC_PCB_T
-from nuc_shield import ShieldParams, build_shield
 from prop import PropParams, build_prop, parse_spec
 
 HERE = Path(__file__).resolve().parent
@@ -103,7 +104,7 @@ class SuperParams:
     battery_w: float = 44.0
     battery_h: float = 33.0
     leds: bool = True  # LED bars on the arms (blue front, red rear)
-    shield: bool = True  # 3D printed NUC shield ring on the pillars between the plates
+    guard: bool = True  # 3D printed LiDAR guard on the top plate (lidar_guard.py)
     hardware: bool = True  # screws, nuts and FC stack spacers
 
     def __post_init__(self):
@@ -244,13 +245,6 @@ def check_props(m: FullMotorParams, pp: PropParams, prop: cq.Shape) -> None:
         raise ValueError(f"props reach z = {lowest:.1f}, below the battery plate top ({-PILLAR_BOT_H})")
 
 
-def check_shield(shield: cq.Shape, others: list[tuple[str, cq.Shape]]) -> None:
-    """The shield (in the drone frame) must not touch the NUC, the pillars, the plates or the LEDs."""
-    for name, shape in others:
-        if shield.intersect(shape).Volume() > 1e-3:
-            raise ValueError(f"the NUC shield hits the {name}")
-
-
 # ---------------------------------------------------------------- assembly tree
 
 
@@ -309,21 +303,6 @@ def build_tree(p: SuperParams) -> Group:
     # Compute: NUC on standoffs, back panel to the rear
     compute = [(nuc_standoff, loc(t=(x, y, MAIN_T))) for x, y in NUC_HOLES_XY]
     compute.append((nuc, loc(rot_z(90), (-NUC_SHIFT, 0, nuc_z))))
-    if p.shield:
-        shield_p = ShieldParams(pillar_xy=PILLAR_TOP_XY[-1][0], plate_gap=PILLAR_TOP_H)
-        shield_shape = build_shield(shield_p)
-        shield = Part("nuc_shield", lambda: (shield_shape, PRINT_BLACK))
-        compute.append((shield, loc(t=(0, 0, MAIN_T))))
-        others = [("NUC", nuc.build().toCompound().moved(loc(rot_z(90), (-NUC_SHIFT, 0, nuc_z))))]
-        others += [("pillars", tube(5.0, 3.0, PILLAR_TOP_H).moved(loc(t=(x, y, MAIN_T)))) for x, y in PILLAR_TOP_XY]
-        others += [("main plate", main_plate.build().toCompound().moved(loc(PLATE_ROT))),
-                   ("top plate", top_plate.build().toCompound().moved(loc(PLATE_ROT, (0, 0, TOP_Z))))]
-        if p.leds:
-            for _, sx, sy, _ in MOTORS:
-                r = LED_R / math.sqrt(2)
-                bar = make_led_bar(LED_FRONT)[0].moved(loc(rot_z(math.degrees(math.atan2(sy, sx))), (sx * r, sy * r, MAIN_T)))
-                others.append(("LED bars", bar))
-        check_shield(shield_shape.moved(loc(t=(0, 0, MAIN_T))), others)
 
     # Flight stack under the main plate: FC on top, ESC below it
     fc_z, esc_z = -8.0, -18.0
@@ -332,10 +311,17 @@ def build_tree(p: SuperParams) -> Group:
 
     # Sensing: Mid-360S on the top plate
     sensing = [(lidar, loc(rot_z(p.lidar_yaw), (0, 0, TOP_Z + TOP_T)))]
+    guard_p = GuardParams()
+    if p.guard:
+        guard_shape = build_guard(guard_p)
+        check_guard(guard_shape)
+        guard = Part("lidar_guard", lambda: (guard_shape, PRINT_BLACK))
+        sensing.append((guard, loc(rot_z(p.lidar_yaw), (0, 0, TOP_Z + TOP_T))))
 
     # Power: battery under the holder
     holder_bottom = BAT_Z - HOLDER.height
-    power = [(battery, loc(t=(0, 0, holder_bottom - p.battery_h / 2)))]
+    # Long side along Y, the same as the holder
+    power = [(battery, loc(rot_z(90), (0, 0, holder_bottom - p.battery_h / 2)))]
 
     # Propulsion: each motor hangs under an arm tip
     propulsion = []
@@ -381,6 +367,14 @@ def build_tree(p: SuperParams) -> Group:
             for x in (-HOLDER.foot_hole_y, HOLDER.foot_hole_y):
                 hw.append((m3x12, loc(side, (x, sy * (FOOT_Y + 4.0), foot_z))))
                 hw.append((m3_nut, loc(nut_axis_y, (x, nut_y, foot_z))))
+        # Guard screws: from under the top plate into the guard feet, into M3 nuts in the foot traps.
+        # The nut flats run along the rib, the same as the trap.
+        if p.guard:
+            for a in RIB_ANGLES:
+                a += p.lidar_yaw
+                x, y = rot_xy((guard_p.rib_r, 0.0), a)
+                hw.append((m3x10, loc(FLIP_X, (x, y, TOP_Z))))
+                hw.append((m3_nut, loc(rot_z(a), (x, y, TOP_Z + TOP_T + guard_p.nut_z))))
         groups.append(Group("hardware", hw))
 
         # FC stack: M2 screws from the top of the main plate, spacers between the boards, nuts under the ESC.
@@ -472,16 +466,14 @@ def step_writer(assembly: bool) -> STEPCAFControl_Writer:
 
 
 def export_part(part: Part, path: str) -> None:
-    """Write one part file. A single-shape part becomes the root product itself.
-    cq.Assembly.export would wrap it in an unnamed root, and the CAD tree would
-    then show the part twice (the top file's reference, then the wrapped shape)."""
+    """Write one part file, with the part as the root product and every piece named.
+    cq.Assembly.export wraps a single shape in an unnamed root and leaves some
+    pieces unnamed, and the CAD tree then shows them twice (instance, then product)."""
     assy = part.build()
-    if assy.children or assy.obj is None:
-        assy.export(path, exportType="STEP")
-        return
     doc, tool = new_doc()
-    add_shape(doc, tool, assy, part.name)
-    writer = step_writer(assembly=False)
+    add_part(doc, tool, assy)
+    tool.UpdateAssemblies()
+    writer = step_writer(assembly=bool(assy.children))
     if not writer.Transfer(doc, STEPControl_AsIs) or writer.Write(path) != IFSelect_RetDone:
         raise RuntimeError(f"STEP export failed for {part.name}")
 
